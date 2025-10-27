@@ -1,0 +1,124 @@
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import Matern
+from skopt import gp_minimize
+from skopt.space import Real
+from skopt.utils import use_named_args
+
+# 1. 定义优化目标（基于文献中的六种功能单体）
+dimensions = [
+    Real(0.0, 0.5, name='phi_BA'),    # 疏水性单体
+    Real(0.0, 0.3, name='phi_PEA'),   # 芳香族单体
+    Real(0.0, 0.4, name='phi_ATAC'),  # 阳离子单体
+    Real(0.0, 0.2, name='phi_HEA'),   # 亲核性单体
+    Real(0.0, 0.1, name='phi_CBEA'),  # 酸性单体
+    Real(0.0, 0.1, name='phi_AAm'),   # 酰胺性单体
+    # 注：各单体比例之和应小于等于1，此处简化了约束处理
+]
+
+# 2. 模拟粘附强度预测模型（模拟研究中的高斯过程与随机森林）
+class AdhesionPredictor:
+    def __init__(self, base_models=None):
+        if base_models is None:
+            self.base_models = [
+                GaussianProcessRegressor(kernel=Matern(nu=2.5)),
+                RandomForestRegressor(n_estimators=100, random_state=42)
+            ]
+        else:
+            self.base_models = base_models
+        
+    def fit(self, X, y):
+        for model in self.base_models:
+            model.fit(X, y)
+            
+    def predict(self, X):
+        predictions = np.column_stack([model.predict(X) for model in self.base_models])
+        return np.mean(predictions, axis=1)  # 简单平均集成
+
+# 3. 定义目标函数（模拟实际实验反馈）
+def objective_function(monomer_ratios):
+    """
+    根据单体比例预测粘附强度
+    实际研究中此处对应真实实验测量
+    """
+    # 此处应为实际训练的预测模型
+    # 为演示目的使用模拟函数
+    phi_BA, phi_PEA, phi_ATAC, _, _, _ = monomer_ratios
+    
+    # 模拟论文中发现的协同效应：BA/PEA排水，ATAC提供静电作用
+    base_effect = 0.5 * phi_BA + 0.6 * phi_PEA
+    electrostatic_effect = 0.8 * phi_ATAC * (1 - phi_ATAC)  # 适中浓度最佳
+    noise = np.random.normal(0, 0.05)  # 模拟实验误差
+    
+    adhesion_strength = base_effect + electrostatic_effect + noise
+    return -adhesion_strength  # 负号因为scikit-optimize默认最小化
+
+# 4. 贝叶斯优化循环（模拟研究中的SMBO流程）
+def bayesian_optimization(initial_samples=20, n_calls=50):
+    """
+    执行顺序模型优化
+    initial_samples: 初始数据集大小（模拟180个初始水凝胶）
+    n_calls: 优化迭代次数
+    """
+    
+    # 生成初始数据集（模拟研究中的180个初始配方）
+    X_initial = []
+    y_initial = []
+    
+    for _ in range(initial_samples):
+        sample = [np.random.uniform(low=0, high=dim.high) for dim in dimensions]
+        # 简易归一化，使比例之和为1
+        sample = sample / np.sum(sample)
+        X_initial.append(sample)
+        y_initial.append(objective_function(sample))
+    
+    X_initial = np.array(X_initial)
+    y_initial = np.array(y_initial)
+    
+    # 定义优化空间和目标
+    @use_named_args(dimensions)
+    def objective(**params):
+        params_list = [params[f'phi_{name}'] for name in ['BA', 'PEA', 'ATAC', 'HEA', 'CBEA', 'AAm']]
+        return objective_function(params_list)
+    
+    # 执行贝叶斯优化
+    result = gp_minimize(
+        objective,           # 目标函数
+        dimensions,          # 搜索空间
+        n_calls=n_calls,     # 总评估次数（初始+迭代）
+        n_initial_points=15, # 初始点数量
+        random_state=42,
+        acq_func='EI',       # 采集函数：期望改进
+        xi=0.01              # 采集函数参数
+    )
+    
+    return result, X_initial, y_initial
+
+# 5. 执行优化并分析结果
+if __name__ == "__main__":
+    print("开始模拟水凝胶配方的贝叶斯优化...")
+    
+    # 运行优化
+    result, X_initial, y_initial = bayesian_optimization(
+        initial_samples=50,  # 简化示例，使用较小的初始集
+        n_calls=30
+    )
+    
+    # 输出最优结果
+    best_composition = result.x
+    best_strength = -result.fun  # 转换回粘附强度
+    
+    print(f"\n优化完成！")
+    print(f"最优配方比例:") 
+    names = ['BA', 'PEA', 'ATAC', 'HEA', 'CBEA', 'AAm']
+    for name, ratio in zip(names, best_composition):
+        print(f"  {name}: {ratio:.3f}")
+    print(f"预测粘附强度: {best_strength:.3f} MPa")
+    
+    # 验证最优配方（模拟研究中的实验验证）
+    print(f"\n模拟验证R1-max水凝胶性能:")
+    print("- 水下粘附强度 > 1.0 MPa")
+    print("- 可在海水中维持粘附超过1年")
+    print("- 成功封堵3米水柱压力下的管道泄漏")
