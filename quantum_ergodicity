@@ -1,0 +1,45 @@
+import numpy as np
+import qutip as qt
+import matplotlib.pyplot as plt
+
+# 设置模拟参数
+delta = 1.0  # 能级分裂
+H = delta * qt.sigmaz() / 2.0  # 系统哈密顿量 (以sigmaz为例)
+
+# 初始状态 |0> 态
+psi0 = qt.basis(2, 0)
+
+# 定义时间反转操作T (近似为复共轭操作K)
+def time_reversal_operator(state):
+    return state.conj()
+
+# 正向演化时间
+tlist = np.linspace(0.0, 10.0, 100)
+
+# 进行正向演化
+result_forward = qt.mesolve(H, psi0, tlist, [], [])
+
+# 在正向演化的最终时刻，应用时间反转操作
+psi_final = result_forward.states[-1]
+psi_reversed = time_reversal_operator(psi_final)
+
+# 对时间反转后的状态，在“反向”哈密顿量下演化
+# 注意：严格的时间反转需要哈密顿量也满足特定条件，此处为演示做了简化
+H_reversed = -H  # 反向演化通常与反向哈密顿量有关
+result_backward = qt.mesolve(H_reversed, psi_reversed, tlist, [], [])
+
+# 提取演化过程中的状态概率
+prob_forward = [qt.expect(qt.sigmaz(), state) for state in result_forward.states]
+prob_backward = [qt.expect(qt.sigmaz(), state) for state in result_backward.states]
+
+# 绘制结果
+plt.figure(figsize=(10, 6))
+plt.plot(tlist, prob_forward, 'b-', linewidth=2, label='正向演化')
+plt.plot(tlist, prob_backward, 'r--', linewidth=2, label='尝试时间反转演化')
+plt.axhline(y=1, color='k', linestyle=':', label='初始态 |0> 期望值')
+plt.xlabel('时间')
+plt.ylabel('Pauli Z 期望值')
+plt.title('量子时间反转概念演示')
+plt.legend()
+plt.grid(True)
+plt.show()
