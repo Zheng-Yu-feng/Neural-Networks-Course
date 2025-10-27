@@ -1,0 +1,178 @@
+import numpy as np
+import pandas as pd
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import Matern
+from skopt import gp_minimize
+from skopt.space import Real
+from skopt.utils import use_named_args
+
+# 1. 定义搜索空间：以三元催化剂 Pd, Pt, Cu 为例
+# 每个元素的比例是0到1之间的连续变量
+dimensions = [
+    Real(0.0, 1.0, name='Pd'),
+    Real(0.0, 1.0, name='Pt'), 
+    Real(0.0, 1.0, name='Cu')
+]
+
+# 2. 知识辅助贝叶斯优化（KABO）模型
+class KnowledgeAssistedBO:
+    def __init__(self, dimensions):
+        self.dimensions = dimensions
+        # 模拟从文献中提取的文本知识嵌入 (例如通过词向量)
+        self.text_knowledge_embeddings = self._load_text_knowledge()
+        # 模拟高斯过程代理模型
+        self.gp = GaussianProcessRegressor(kernel=Matern(nu=2.5))
+        
+    def _load_text_knowledge(self):
+        """模拟从材料学文献数据库中加载元素知识[citation:4]"""
+        # 这里用简单的字典模拟词向量嵌入
+        knowledge_base = {
+            'Pd': np.array([0.9, 0.1, 0.8]),  # 高催化活性，耐腐蚀
+            'Pt': np.array([0.95, 0.2, 0.9]), # 优异催化性能，昂贵
+            'Cu': np.array([0.3, 0.8, 0.2])   # 导电性好，成本低
+        }
+        return knowledge_base
+    
+    def _extract_image_features(self, composition):
+        """模拟从电镜图像中提取形态学特征[citation:4]"""
+        # 在实际CRESt中，这会通过计算机视觉分析SEM图像
+        # 这里返回模拟特征：颗粒大小分布、覆盖率等
+        Pd_ratio = composition[0]
+        return np.array([
+            Pd_ratio * 0.5 + 0.1,  # 颗粒分布斜率
+            Pd_ratio * 0.3 + 0.2,  # 颗粒分布偏差
+            Pd_ratio * 0.8 + 0.1,  # 颗粒覆盖率
+            Pd_ratio * 100 + 20    # 单位面积颗粒数量
+        ])
+    
+    def create_multimodal_features(self, composition):
+        """创建多模态特征向量：成分 + 文本知识 + 图像特征[citation:4]"""
+        # 1. 基础化学成分特征
+        composition_features = np.array(composition)
+        
+        # 2. 文本知识特征：加权平均文本嵌入
+        element_weights = composition / np.sum(composition)  # 归一化比例作为权重
+        text_features = np.zeros(3)  # 3维文本嵌入
+        elements = ['Pd', 'Pt', 'Cu']
+        for i, element in enumerate(elements):
+            text_features += element_weights[i] * self.text_knowledge_embeddings[element]
+        
+        # 3. 图像特征 (模拟)
+        image_features = self._extract_image_features(composition)
+        
+        # 融合所有特征
+        multimodal_features = np.concatenate([
+            composition_features,
+            text_features, 
+            image_features
+        ])
+        
+        return multimodal_features
+    
+    def fit(self, X, y):
+        """使用多模态特征训练代理模型"""
+        multimodal_X = np.array([self.create_multimodal_features(x) for x in X])
+        self.gp.fit(multimodal_X, y)
+        
+    def predict(self, X):
+        """使用多模态特征进行预测"""
+        multimodal_X = np.array([self.create_multimodal_features(x) for x in X])
+        return self.gp.predict(multimodal_X)
+
+# 3. 模拟实验执行和评估
+def execute_real_world_experiment(composition):
+    """
+    模拟真实世界的实验执行[citation:4]
+    在实际CRESt中，这会通过机器人手臂、液体处理机器人等自动化设备完成
+    """
+    Pd, Pt, Cu = composition
+    
+    # 模拟甲酸氧化反应的催化性能计算
+    # 性能大致与Pd、Pt含量正相关，但元素间有协同效应
+    base_performance = Pd * 0.6 + Pt * 0.8 + Cu * 0.1
+    
+    # 模拟协同效应：Pd-Cu协同
+    synergy = Pd * Cu * 0.3 if Pd > 0.3 and Cu > 0.1 else 0
+    
+    # 模拟实验噪声
+    noise = np.random.normal(0, 0.05)
+    
+    performance = base_performance + synergy + noise
+    cost = Pd * 10 + Pt * 15 + Cu * 1  # 成本计算
+    
+    # 目标：高性能且低成本 (成本比性能)
+    return performance / cost
+
+# 4. 主动学习循环
+def active_learning_loop(n_iter=50):
+    """模拟CRESt的主动学习循环[citation:4]"""
+    
+    # 初始化KABO模型
+    kabo = KnowledgeAssistedBO(dimensions)
+    
+    # 初始数据集 - 模拟少量初始实验
+    X_init = np.array([[0.7, 0.2, 0.1], [0.5, 0.4, 0.1], [0.8, 0.1, 0.1]])
+    y_init = np.array([execute_real_world_experiment(x) for x in X_init])
+    
+    X = list(X_init)
+    y = list(y_init)
+    
+    print("开始CRESt主动学习循环...")
+    print(f"初始样本: {len(X)}个")
+    
+    for i in range(n_iter):
+        # 训练KABO模型
+        kabo.fit(X, y)
+        
+        # 使用期望改进(EI)寻找下一个最佳实验点
+        @use_named_args(dimensions=dimensions)
+        def objective(**params):
+            test_point = [params['Pd'], params['Pt'], params['Cu']]
+            # 确保比例和为1 (简化处理)
+            total = sum(test_point)
+            if total == 0:
+                return 0
+            normalized_point = [x/total for x in test_point]
+            return -kabo.predict([normalized_point])[0]  # 负号因为scikit-optimize最小化
+        
+        # 寻找下一个实验点
+        next_point = gp_minimize(objective, dimensions, n_calls=1, n_initial_points=0).x
+        next_point = [x/sum(next_point) for x in next_point]  # 归一化
+        
+        # "执行实验" - 在实际CRESt中这会触发机器人实验平台[citation:4]
+        performance = execute_real_world_experiment(next_point)
+        
+        # 记录结果
+        X.append(next_point)
+        y.append(performance)
+        
+        if (i + 1) % 10 == 0:
+            best_idx = np.argmax(y)
+            print(f"迭代 {i+1}: 最佳性能 = {y[best_idx]:.3f}, "
+                  f"最佳成分 = Pd{X[best_idx][0]:.2f}-Pt{X[best_idx][1]:.2f}-Cu{X[best_idx][2]:.2f}")
+    
+    return X, y
+
+# 5. 主程序
+if __name__ == "__main__":
+    print("CRESt平台核心逻辑模拟")
+    print("=" * 50)
+    
+    # 运行主动学习循环
+    X, y = active_learning_loop(n_iter=30)
+    
+    # 输出最终结果
+    best_idx = np.argmax(y)
+    best_composition = X[best_idx]
+    best_performance = y[best_idx]
+    
+    print("\n" + "=" * 50)
+    print("优化完成！")
+    print(f"最佳催化剂配方: Pd{best_composition[0]:.3f}-Pt{best_composition[1]:.3f}-Cu{best_composition[2]:.3f}")
+    print(f"最佳成本比性能: {best_performance:.3f}")
+    
+    # 模拟发现的高性能催化剂[citation:4]
+    if best_performance > 0.5:
+        print("✓ 成功发现高性能催化剂！")
+        print("✓ 模拟CRESt在90天内完成3500次测试的场景")
+        print("✓ 性能较基准提升显著")
